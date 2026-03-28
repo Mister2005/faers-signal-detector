@@ -69,11 +69,15 @@ def compute_signals_for_quarter(quarter_cutoff: str | None = None) -> pd.DataFra
     """
     # Build quarter filter clause
     if quarter_cutoff:
-        quarter_filter = f"AND d.quarter <= '{quarter_cutoff}'"
-        rq_filter = f"AND r.quarter <= '{quarter_cutoff}'"
+        drug_quarter_filter = f"AND d.quarter <= '{quarter_cutoff}'"
+        reac_quarter_filter = f"AND r.quarter <= '{quarter_cutoff}'"
+        clean_drug_quarter_filter = f"AND quarter <= '{quarter_cutoff}'"
+        clean_reac_quarter_filter = f"AND quarter <= '{quarter_cutoff}'"
     else:
-        quarter_filter = ""
-        rq_filter = ""
+        drug_quarter_filter = ""
+        reac_quarter_filter = ""
+        clean_drug_quarter_filter = ""
+        clean_reac_quarter_filter = ""
 
     # Step 1: Get drug-event co-occurrence counts (= a)
     print("  Computing drug-event co-occurrence counts...")
@@ -86,8 +90,8 @@ def compute_signals_for_quarter(quarter_cutoff: str | None = None) -> pd.DataFra
         INNER JOIN clean_reac r ON d.primaryid = r.primaryid
         WHERE d.drug_name_clean != 'UNKNOWN'
           AND r.reaction_pt IS NOT NULL
-          {quarter_filter}
-          {rq_filter}
+                    {drug_quarter_filter}
+                    {reac_quarter_filter}
         GROUP BY d.drug_name_clean, r.reaction_pt
         HAVING COUNT(DISTINCT d.primaryid) >= {MIN_CASE_COUNT}
     """
@@ -99,7 +103,7 @@ def compute_signals_for_quarter(quarter_cutoff: str | None = None) -> pd.DataFra
     drug_totals_sql = f"""
         SELECT drug_name_clean AS drug_name, COUNT(DISTINCT primaryid) AS drug_total
         FROM clean_drug
-        WHERE drug_name_clean != 'UNKNOWN' {quarter_filter}
+        WHERE drug_name_clean != 'UNKNOWN' {clean_drug_quarter_filter}
         GROUP BY drug_name_clean
     """
     drug_totals = query_df(drug_totals_sql).set_index("drug_name")["drug_total"]
@@ -109,7 +113,7 @@ def compute_signals_for_quarter(quarter_cutoff: str | None = None) -> pd.DataFra
     event_totals_sql = f"""
         SELECT reaction_pt, COUNT(DISTINCT primaryid) AS event_total
         FROM clean_reac
-        WHERE 1=1 {rq_filter}
+        WHERE 1=1 {clean_reac_quarter_filter}
         GROUP BY reaction_pt
     """
     event_totals = query_df(event_totals_sql).set_index("reaction_pt")["event_total"]

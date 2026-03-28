@@ -174,17 +174,20 @@ def build_clean_demo():
     print(f"  Raw reports: {query_df('SELECT COUNT(*) AS n FROM raw_demo').iloc[0,0]:,}")
     print(f"  Deduplicated: {len(df):,}")
 
-    # Normalize age
-    df["age_years"] = df.apply(
-        lambda r: normalize_age(r["age"], r["age_cod"]), axis=1
-    )
+    # Normalize age (vectorized for large FAERS volumes)
+    age_num = pd.to_numeric(df["age"], errors="coerce")
+    age_cod = df["age_cod"].astype(str).str.strip().str.upper()
+    multiplier = age_cod.map(AGE_UNIT_TO_YEARS).fillna(1.0)
+    age_years = (age_num * multiplier).round(2)
+    age_years[(age_years < 0) | (age_years > 120)] = np.nan
+    df["age_years"] = age_years
     df["sex"] = df["sex"].str.upper().str.strip().replace({"M": "Male", "F": "Female"})
 
     # Determine if any serious outcome (death, hospitalization, life-threatening)
-    serious_ids = query_df(
+    serious_ids = set(query_df(
         "SELECT DISTINCT caseid FROM raw_outc WHERE outc_cod IN ('DE','LT','HO','DS')"
-    )["caseid"].astype(str).tolist()
-    df["serious"] = df["caseid"].astype(str).isin(serious_ids)
+    )["caseid"].dropna().astype("Int64").astype(str).tolist())
+    df["serious"] = df["caseid"].astype("Int64").astype(str).isin(serious_ids)
 
     clean = df[[
         "primaryid", "caseid", "quarter",
@@ -218,15 +221,26 @@ def build_clean_drug():
     # Use prod_ai (active ingredient) if drugname is missing
     df["drug_name_raw"] = df["drugname"].fillna(df["prod_ai"]).fillna("UNKNOWN")
 
-    print("  Running name normalization (this may take a few minutes)...")
-    df["drug_name_clean"] = df["drug_name_raw"].apply(
-        lambda n: normalize_drug_name(n, brand_map, generic_list)
-    )
+    print("  Running name normalization...")
+    # Normalize unique raw names once to avoid O(rows x fuzzy_match) behavior.
+    unique_raw = df["drug_name_raw"].astype(str).dropna().unique().tolist()
+    name_map = {}
+    for name in unique_raw:
+        name_map[name] = normalize_drug_name(name, brand_map, generic_list)
+    df["drug_name_clean"] = df["drug_name_raw"].astype(str).map(name_map).fillna("UNKNOWN")
 
     clean = df[[
         "primaryid", "drug_seq", "role_cod",
         "drug_name_raw", "drug_name_clean", "route", "quarter"
     ]]
+
+    # raw_drug can contain repeated rows for the same (primaryid, drug_seq)
+    # which violates clean_drug PK; keep a single representative row.
+    before = len(clean)
+    clean = clean.drop_duplicates(subset=["primaryid", "drug_seq"], keep="first")
+    removed = before - len(clean)
+    if removed:
+        print(f"  [INFO] Removed {removed:,} duplicate (primaryid, drug_seq) rows before insert")
 
     run_sql("TRUNCATE TABLE clean_drug")
     clean.to_sql("clean_drug", engine, if_exists="append", index=False,
