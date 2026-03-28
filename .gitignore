@@ -1,0 +1,32 @@
+data/raw/
+data/processed/
+data/reference/kaggle/*
+!data/reference/kaggle/.gitkeep
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.DS_Store
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Notebook and editor artifacts
+.ipynb_checkpoints/
+.vscode/
+
+# Local secrets and runtime files
+kaggle.json
+.streamlit/secrets.toml
+*.log
+
+# Downloaded archives and large source artifacts
+*.zip
+*.xlsx
+
+# Temporary helper scripts
+_*.py
